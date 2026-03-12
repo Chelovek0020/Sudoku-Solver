@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write
 
@@ -29,18 +32,59 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Install UPX (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+      - name: Install UPX (cross-platform fallback)
+        shell: bash
+        run: |
+          set -e
+          if command -v upx >/dev/null 2>&1; then
+            upx --version
+            exit 0
+          fi
 
-      - name: Install UPX (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install upx -y
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            sudo apt-get update || true
+            sudo apt-get install -y upx upx-ucl || true
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew update || true
+            brew install upx || true
+          fi
 
-      - name: Install UPX (macOS)
-        if: runner.os == 'macOS'
-        run: brew install upx
+          if command -v upx >/dev/null 2>&1; then
+            upx --version
+            exit 0
+          fi
+
+          # Fallback: official release binaries
+          UPX_VER="4.2.4"
+          mkdir -p .tools
+          cd .tools
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            curl -L -o upx.zip "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-win64.zip"
+            python - <<'PY'
+import zipfile
+z=zipfile.ZipFile('upx.zip')
+z.extractall('.')
+PY
+            echo "$PWD/upx-${UPX_VER}-win64" >> "$GITHUB_PATH"
+          elif [[ "${{ runner.os }}" == "Linux" ]]; then
+            curl -L -o upx.tar.xz "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-amd64_linux.tar.xz"
+            tar -xf upx.tar.xz
+            echo "$PWD/upx-${UPX_VER}-amd64_linux" >> "$GITHUB_PATH"
+          else
+            curl -L -o upx.tar.xz "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-amd64_macos.tar.xz"
+            tar -xf upx.tar.xz
+            echo "$PWD/upx-${UPX_VER}-amd64_macos" >> "$GITHUB_PATH"
+          fi
+
+      - name: Verify UPX
+        shell: bash
+        run: |
+          if ! command -v upx >/dev/null 2>&1; then
+            echo "UPX is not available; beta-compressed build will fallback to non-compressed."
+            exit 0
+          fi
+          upx --version
 
       - name: Build A (onefile embedded)
         shell: bash
@@ -87,12 +131,23 @@ jobs:
               DATA_ARGS="--add-data assets/app.ico;assets"
             fi
           fi
-          UPX_ARGS=""
-          if command -v upx >/dev/null 2>&1; then
-            UPX_ARGS="--upx-dir $(dirname $(command -v upx))"
-          fi
+
           pyinstaller --noconfirm --clean --onefile --windowed \
-            --name SudokuSolver-beta-compressed $UPX_ARGS $ICON_ARGS $DATA_ARGS src/main.py
+            --name SudokuSolver-beta-compressed $ICON_ARGS $DATA_ARGS src/main.py
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            TARGET="dist/SudokuSolver-beta-compressed.exe"
+          else
+            TARGET="dist/SudokuSolver-beta-compressed"
+          fi
+
+          BEFORE=$(wc -c < "$TARGET")
+          if command -v upx >/dev/null 2>&1; then
+            upx --best --lzma "$TARGET" || true
+          fi
+          AFTER=$(wc -c < "$TARGET")
+          echo "Size before UPX: $BEFORE"
+          echo "Size after  UPX: $AFTER"
 
       - name: Package outputs
         shell: bash
