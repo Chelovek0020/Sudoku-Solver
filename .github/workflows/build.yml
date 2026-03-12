@@ -61,11 +61,7 @@ jobs:
 
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             curl -L -o upx.zip "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-win64.zip"
-            python - <<'PY'
-import zipfile
-z=zipfile.ZipFile('upx.zip')
-z.extractall('.')
-PY
+            python -c "import zipfile; zipfile.ZipFile('upx.zip').extractall('.')"
             echo "$PWD/upx-${UPX_VER}-win64" >> "$GITHUB_PATH"
           elif [[ "${{ runner.os }}" == "Linux" ]]; then
             curl -L -o upx.tar.xz "https://github.com/upx/upx/releases/download/v${UPX_VER}/upx-${UPX_VER}-amd64_linux.tar.xz"
